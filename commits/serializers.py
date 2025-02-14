@@ -1,11 +1,16 @@
 from rest_framework import serializers
-from .models import GitHubCredentials
+from .models import GitHubCredentials, CommitHistory
 from django.contrib.auth.models import User
 from django.contrib.auth import authenticate
 
 class GitHubCredentialsSerializer(serializers.ModelSerializer):
     class Meta:
         model = GitHubCredentials
+        fields = '__all__'
+
+class GitHubCommitsSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = CommitHistory
         fields = '__all__'
 
 class RegisterSerializer(serializers.ModelSerializer):
