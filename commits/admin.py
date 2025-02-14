@@ -1,3 +1,7 @@
 from django.contrib import admin
+from commits.models import *
 
-# Register your models here.
+models = [CommitHistory, GitHubCredentials]
+
+for model in models:
+    admin.site.register(model)

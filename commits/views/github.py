@@ -1,7 +1,8 @@
-from rest_framework.decorators import api_view
+from rest_framework.decorators import api_view, permission_classes
 from rest_framework.response import Response
-from .models import GitHubCredentials
-from .serializers import GitHubCredentialsSerializer
+from rest_framework.permissions import IsAuthenticated
+from commits.models import GitHubCredentials
+from commits.serializers import GitHubCredentialsSerializer
 import os, git, random, time
 from github import Github
 from datetime import datetime
@@ -62,9 +63,10 @@ def push_commits(repo_name, num_commits, github_username, github_token):
         return {"status": "error", "message": str(e)}
 
 @api_view(['POST'])
+@permission_classes([IsAuthenticated])
 def save_github_credentials(request):
     """Save GitHub username and token"""
-    GitHubCredentials.objects.all().delete()
+    print(request.user)
     serializer = GitHubCredentialsSerializer(data=request.data)
     if serializer.is_valid():
         serializer.save()
@@ -72,6 +74,7 @@ def save_github_credentials(request):
     return Response(serializer.errors, status=400)
 
 @api_view(['GET'])
+@permission_classes([IsAuthenticated])
 def get_github_credentials(request):
     """Get saved GitHub credentials"""
     credentials = GitHubCredentials.objects.first()
@@ -80,12 +83,14 @@ def get_github_credentials(request):
     return Response({"error": "No credentials found"}, status=404)
 
 @api_view(['DELETE'])
+@permission_classes([IsAuthenticated])
 def remove_github_credentials(request):
     """Remove GitHub credentials"""
     GitHubCredentials.objects.all().delete()
     return Response({"status": "removed"})
 
 @api_view(['POST'])
+@permission_classes([IsAuthenticated])
 def make_commits(request):
     """Make commits to GitHub repo"""
     credentials = GitHubCredentials.objects.first()
