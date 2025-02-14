@@ -1,15 +1,14 @@
-from django.shortcuts import render
-from .forms import CommitForm
-import os
-import git
-import random
-import time
+from rest_framework.decorators import api_view
+from rest_framework.response import Response
+from .models import GitHubCredentials
+from .serializers import GitHubCredentialsSerializer
+import os, git, random, time
 from github import Github
 from datetime import datetime
 
 # GitHub Credentials (Replace with your actual token)
-GITHUB_TOKEN = "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" # testing token
-GITHUB_USERNAME = "noumanejazz"
+# GITHUB_TOKEN = "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" # testing token
+# GITHUB_USERNAME = "noumanejazz"
 
 # Code snippets for commits
 CODE_SNIPPETS = [
@@ -30,51 +29,79 @@ def two_sum(nums, target):
     }
 ]
 
-def push_commits(repo_name, num_commits):
+def push_commits(repo_name, num_commits, github_username, github_token):
     try:
-        github = Github(GITHUB_TOKEN)
+        github = Github(github_token)
         user = github.get_user()
         repo = user.get_repo(repo_name)
-        repo_url = repo.clone_url.replace("https://", f"https://{GITHUB_TOKEN}@")
+        repo_url = repo.clone_url.replace("https://", f"https://{github_token}@")
         local_path = f"./{repo_name}"
 
         if not os.path.exists(local_path):
             git.Repo.clone_from(repo_url, local_path)
 
         repo = git.Repo(local_path)
-
         with repo.config_writer() as config:
-            config.set_value("user", "name", GITHUB_USERNAME)
-            config.set_value("user", "email", f"{GITHUB_USERNAME}@users.noreply.github.com")
+            config.set_value("user", "name", github_username)
+            config.set_value("user", "email", f"{github_username}@users.noreply.github.com")
 
-        for i in range(num_commits):
+        for _ in range(num_commits):
             problem = random.choice(CODE_SNIPPETS)
-            commit_message = problem["commit_msg"]
-            timestamp = datetime.now().strftime("%Y%m%d%H%M%S")
-            filename = f"{problem['title']}_{timestamp}.{problem['file_type']}"
+            filename = f"{problem['title']}_{datetime.now().strftime('%Y%m%d%H%M%S')}.{problem['file_type']}"
             file_path = os.path.join(local_path, filename)
-
             with open(file_path, "w") as f:
                 f.write(problem["code"])
 
             repo.git.add(A=True)
-            repo.index.commit(commit_message)
+            repo.index.commit(problem["commit_msg"])
             repo.remote().push()
             time.sleep(10)
 
-        return "Commits pushed successfully!"
+        return {"status": "success", "message": "Commits pushed successfully!"}
     except Exception as e:
-        return f"Error: {str(e)}"
+        return {"status": "error", "message": str(e)}
 
-def commit_view(request):
-    message = ""
-    if request.method == "POST":
-        form = CommitForm(request.POST)
-        if form.is_valid():
-            repo_name = form.cleaned_data["repo_name"]
-            num_commits = form.cleaned_data["num_commits"]
-            message = push_commits(repo_name, num_commits)
-    else:
-        form = CommitForm()
+@api_view(['POST'])
+def save_github_credentials(request):
+    """Save GitHub username and token"""
+    GitHubCredentials.objects.all().delete()
+    serializer = GitHubCredentialsSerializer(data=request.data)
+    if serializer.is_valid():
+        serializer.save()
+        return Response({"status": "saved"})
+    return Response(serializer.errors, status=400)
 
-    return render(request, "commits/index.html", {"form": form, "message": message})
+@api_view(['GET'])
+def get_github_credentials(request):
+    """Get saved GitHub credentials"""
+    credentials = GitHubCredentials.objects.first()
+    if credentials:
+        return Response(GitHubCredentialsSerializer(credentials).data)
+    return Response({"error": "No credentials found"}, status=404)
+
+@api_view(['DELETE'])
+def remove_github_credentials(request):
+    """Remove GitHub credentials"""
+    GitHubCredentials.objects.all().delete()
+    return Response({"status": "removed"})
+
+@api_view(['POST'])
+def make_commits(request):
+    """Make commits to GitHub repo"""
+    credentials = GitHubCredentials.objects.first()
+    if not credentials:
+        return Response({"error": "GitHub credentials not found"}, status=400)
+
+    repo_name = request.data.get("repo_name")
+    num_commits = request.data.get("num_commits")
+
+    if not repo_name or not num_commits:
+        return Response({"error": "repo_name and num_commits are required"}, status=400)
+
+    try:
+        num_commits = int(num_commits)
+    except ValueError:
+        return Response({"error": "num_commits must be an integer"}, status=400)
+
+    result = push_commits(repo_name, num_commits, credentials.github_username, credentials.github_token)
+    return Response(result)
