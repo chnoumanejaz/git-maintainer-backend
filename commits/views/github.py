@@ -31,31 +31,6 @@ def two_sum(nums, target):
     }
 ]
 
-import os
-import git
-import shutil
-import random
-import time
-from github import Github
-from datetime import datetime
-
-CODE_SNIPPETS = [
-    {
-        "title": "two_sum",
-        "commit_msg": "Added optimized Python solution for Two Sum problem",
-        "file_type": "py",
-        "code": '''# LeetCode Problem: Two Sum
-def two_sum(nums, target):
-    num_map = {}
-    for i, num in enumerate(nums):
-        complement = target - num
-        if complement in num_map:
-            return [num_map[complement], i]
-        num_map[num] = i
-    return []
-'''
-    }
-]
 
 def push_commits(repo_name, num_commits, github_username, github_token):
     local_path = f"./{repo_name}"
@@ -179,3 +154,10 @@ def make_commits(request):
 
     status_code = 201 if result["status"] == "success" else 400
     return Response(result, status=status_code)
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def get_commits_history(request):
+    """Get commit history of the user"""
+    serializer = GitHubCommitsSerializer(request.user.commit_history, many=True)
+    return Response(serializer.data, status=200)
