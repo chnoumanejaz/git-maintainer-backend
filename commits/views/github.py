@@ -3,10 +3,8 @@ from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
 from commits.models import GitHubCredentials
 from commits.serializers import GitHubCredentialsSerializer, GitHubCommitsSerializer
-import os, git, random, time, json
+import os, git, time, json, re, shutil
 from github import Github
-from datetime import datetime
-import shutil
 from openai import OpenAI
 from commits.openai.openai_models import OpenAIResponse
 
@@ -43,42 +41,19 @@ def get_ai_response(user_input: str) -> OpenAIResponse:
 
     print("response_text", response_text , "\n\n\n\n\n\n\n\n\n")
 
-   # Extract JSON content between ```json and ```
-    start_marker = "```json"
-    end_marker = "```"
-
-    start_index = response_text.find(start_marker)
-    end_index = response_text.rfind(end_marker)
-
-    if start_index != -1 and end_index != -1 and start_index < end_index:
-        response_text = response_text[start_index + len(start_marker):end_index].strip()
-
+    match = re.search(r'\{(.*)\}', response_text, re.DOTALL)
+    extracted_response = ""
+    if match:
+        extracted_response = match.group(0)
+        print(extracted_response)
+    else:
+        print("No data found inside {}")
 
     # Convert to a dictionary
-    response_dict = json.loads(response_text)
+    response_dict = json.loads(extracted_response)
 
     # Convert to Pydantic model
     return OpenAIResponse(**response_dict)
-
-
-# Code snippets for commits
-# CODE_SNIPPETS = [
-#     {
-#         "title": "two_sum",
-#         "commit_msg": "Added optimized Python solution for Two Sum problem",
-#         "file_type": "py",
-#         "code": '''# LeetCode Problem: Two Sum
-# def two_sum(nums, target):
-#     num_map = {}
-#     for i, num in enumerate(nums):
-#         complement = target - num
-#         if complement in num_map:
-#             return [num_map[complement], i]
-#         num_map[num] = i
-#     return []
-# '''
-#     }
-# ]
 
 
 def push_commits(repo_name, num_commits, github_username, github_token, snippets):
@@ -195,7 +170,8 @@ def make_commits(request):
     num_commits = request.data["num_commits"]
 
     result = None
-    response = get_ai_response(user_input + f" and make {num_commits} commits")
+    user_message = user_input + f" and make {num_commits} commits"
+    response = get_ai_response(user_message)
     print("response--> ", response)
 
     if response and response.is_pushable:
@@ -205,7 +181,7 @@ def make_commits(request):
 
     # Update commit history based on result
     update_data = {
-        "messages": result.pop("messages", [response.response]),
+        "messages": result.get("messages", [response.response]),
         "new_repo": result.pop("new_repo", False),
         "is_pushed": result["status"] == "success"
     }
