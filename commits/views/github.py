@@ -3,36 +3,85 @@ from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
 from commits.models import GitHubCredentials
 from commits.serializers import GitHubCredentialsSerializer, GitHubCommitsSerializer
-import os, git, random, time
+import os, git, random, time, json
 from github import Github
 from datetime import datetime
 import shutil
+from openai import OpenAI
+from commits.openai.openai_models import OpenAIResponse
+
 
 # GitHub Credentials (Replace with your actual token)
 # GITHUB_TOKEN = "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" # testing token
 # GITHUB_USERNAME = "noumanejazz"
+API_KEY_DEEPSEEK = "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" # testing key
+
+
+# Load system context from file
+context_path = "commits/openai/context.txt"
+print("context_path", context_path)
+
+with open(context_path, "r") as file:
+    system_context = file.read()
+
+client = OpenAI(
+  base_url="https://openrouter.ai/api/v1",
+  api_key=API_KEY_DEEPSEEK,
+)
+
+def get_ai_response(user_input: str) -> OpenAIResponse:
+    completion = client.chat.completions.create(
+        extra_body={},
+        model="deepseek/deepseek-r1-distill-llama-70b:free",
+        messages=[
+            {"role": "system", "content": system_context},
+            {"role": "user", "content": user_input}
+        ]
+    )
+
+    response_text = completion.choices[0].message.content.strip()
+
+    print("response_text", response_text , "\n\n\n\n\n\n\n\n\n")
+
+   # Extract JSON content between ```json and ```
+    start_marker = "```json"
+    end_marker = "```"
+
+    start_index = response_text.find(start_marker)
+    end_index = response_text.rfind(end_marker)
+
+    if start_index != -1 and end_index != -1 and start_index < end_index:
+        response_text = response_text[start_index + len(start_marker):end_index].strip()
+
+
+    # Convert to a dictionary
+    response_dict = json.loads(response_text)
+
+    # Convert to Pydantic model
+    return OpenAIResponse(**response_dict)
+
 
 # Code snippets for commits
-CODE_SNIPPETS = [
-    {
-        "title": "two_sum",
-        "commit_msg": "Added optimized Python solution for Two Sum problem",
-        "file_type": "py",
-        "code": '''# LeetCode Problem: Two Sum
-def two_sum(nums, target):
-    num_map = {}
-    for i, num in enumerate(nums):
-        complement = target - num
-        if complement in num_map:
-            return [num_map[complement], i]
-        num_map[num] = i
-    return []
-'''
-    }
-]
+# CODE_SNIPPETS = [
+#     {
+#         "title": "two_sum",
+#         "commit_msg": "Added optimized Python solution for Two Sum problem",
+#         "file_type": "py",
+#         "code": '''# LeetCode Problem: Two Sum
+# def two_sum(nums, target):
+#     num_map = {}
+#     for i, num in enumerate(nums):
+#         complement = target - num
+#         if complement in num_map:
+#             return [num_map[complement], i]
+#         num_map[num] = i
+#     return []
+# '''
+#     }
+# ]
 
 
-def push_commits(repo_name, num_commits, github_username, github_token):
+def push_commits(repo_name, num_commits, github_username, github_token, snippets):
     local_path = f"./{repo_name}"
     try:
         github = Github(github_token)
@@ -65,19 +114,18 @@ def push_commits(repo_name, num_commits, github_username, github_token):
 
         # Create & push commits
         commit_messages = []
-        for _ in range(num_commits):
-            problem = random.choice(CODE_SNIPPETS)
-            filename = f"{problem['title']}_{datetime.now().strftime('%Y%m%d%H%M%S')}.{problem['file_type']}"
+        for problem in snippets:
+            filename = f"{problem.title}.{problem.file_type}"
             file_path = os.path.join(local_path, filename)
 
             with open(file_path, "w") as f:
-                f.write(problem["code"])
+                f.write(problem.code)
 
             repo.git.add(A=True)
-            repo.index.commit(problem["commit_msg"])
+            repo.index.commit(problem.commit_message)
             repo.remote().push()
-            print(f"✅ Commit pushed: {filename}")
-            commit_messages.append(problem["commit_msg"])
+            print(f"✅ Commit pushed: {problem.commit_message}")
+            commit_messages.append(problem.commit_message)
 
             time.sleep(2)
 
@@ -132,6 +180,11 @@ def make_commits(request):
     if not credentials:
         return Response({"error": "Please add the GitHub credentials first to make the commit"}, status=400)
 
+    if not request.data.get("user_input"):
+        return Response({"error": "Please provide a user input to make the commit"}, status=400)
+
+    user_input = request.data.pop("user_input")
+
     # Save initial commit history
     request.data["user"] = request.user.id
     base_serializer = GitHubCommitsSerializer(data=request.data)
@@ -140,11 +193,19 @@ def make_commits(request):
 
     repo_name = request.data["repo_name"]
     num_commits = request.data["num_commits"]
-    result = push_commits(repo_name, num_commits, credentials.github_username, credentials.github_token)
+
+    result = None
+    response = get_ai_response(user_input + f" and make {num_commits} commits")
+    print("response--> ", response)
+
+    if response and response.is_pushable:
+        result = push_commits(repo_name, num_commits, credentials.github_username, credentials.github_token, response.snippets)
+    else:
+        result = {"status": "error", "messages": [response.response]}
 
     # Update commit history based on result
     update_data = {
-        "messages": result.pop("messages", []),
+        "messages": result.pop("messages", [response.response]),
         "new_repo": result.pop("new_repo", False),
         "is_pushed": result["status"] == "success"
     }
