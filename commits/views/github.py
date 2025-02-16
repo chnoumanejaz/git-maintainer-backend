@@ -2,6 +2,7 @@ from rest_framework.decorators import api_view, permission_classes
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
 from commits.models import GitHubCredentials
+from rest_framework.exceptions import ValidationError
 from commits.serializers import GitHubCredentialsSerializer, GitHubCommitsSerializer
 import os, git, time, json, re, shutil
 from github import Github
@@ -160,46 +161,53 @@ def remove_github_credentials(request):
 @permission_classes([IsAuthenticated])
 def make_commits(request):
     """Make commits to GitHub repo and save history"""
-    credentials = GitHubCredentials.objects.filter(user=request.user).first()
-    if not credentials:
-        return Response({"error": "Please add the GitHub credentials first to make the commit"}, status=400)
+    try:
+        credentials = GitHubCredentials.objects.filter(user=request.user).first()
+        if not credentials:
+            return Response({"error": "Please add the GitHub credentials first to make the commit"}, status=400)
 
-    if not request.data.get("user_input"):
-        return Response({"error": "Please provide a user input to make the commit"}, status=400)
+        if not request.data.get("user_input"):
+            return Response({"error": "Please provide a user input to make the commit"}, status=400)
 
-    user_input = request.data.pop("user_input")
+        user_input = request.data.pop("user_input")
 
-    # Save initial commit history
-    request.data["user"] = request.user.id
-    base_serializer = GitHubCommitsSerializer(data=request.data)
-    if base_serializer.is_valid(raise_exception=True):
-        commit_instance = base_serializer.save()
+        # Save initial commit history
+        request.data["user"] = request.user.id
+        base_serializer = GitHubCommitsSerializer(data=request.data)
+        if base_serializer.is_valid(raise_exception=True):
+            commit_instance = base_serializer.save()
 
-    repo_name = request.data["repo_name"]
-    num_commits = request.data["num_commits"]
+        repo_name = request.data["repo_name"]
+        num_commits = request.data["num_commits"]
 
-    result = None
-    user_message = user_input + f" and make {num_commits} commits"
-    response = get_ai_response(user_message)
-    print("response--> ", response)
+        result = None
+        user_message = user_input + f" and make {num_commits} commits"
+        response = get_ai_response(user_message)
+        print("response--> ", response)
 
-    if response and response.is_pushable:
-        result = push_commits(repo_name, num_commits, credentials.github_username, credentials.github_token, response.snippets)
-    else:
-        result = {"status": "error", "messages": [response.response]}
+        if response and response.is_pushable:
+            result = push_commits(repo_name, num_commits, credentials.github_username, credentials.github_token, response.snippets)
+        else:
+            result = {"status": "error", "messages": [response.response]}
 
-    # Update commit history based on result
-    update_data = {
-        "messages": result.get("messages", [response.response]),
-        "new_repo": result.pop("new_repo", False),
-        "is_pushed": result["status"] == "success"
-    }
-    update_serializer = GitHubCommitsSerializer(commit_instance, data=update_data, partial=True)
-    if update_serializer.is_valid(raise_exception=True):
-        update_serializer.save()
+        # Update commit history based on result
+        update_data = {
+            "messages": result.get("messages", [response.response]),
+            "new_repo": result.pop("new_repo", False),
+            "is_pushed": result["status"] == "success"
+        }
+        update_serializer = GitHubCommitsSerializer(commit_instance, data=update_data, partial=True)
+        if update_serializer.is_valid(raise_exception=True):
+            update_serializer.save()
 
-    status_code = 201 if result["status"] == "success" else 400
-    return Response(result, status=status_code)
+        status_code = 201 if result["status"] == "success" else 400
+        return Response(result, status=status_code)
+
+    except ValidationError as e:
+        return Response({"error": e.detail}, status=400)
+
+    except Exception as e:
+        return Response({"error": str(e)}, status=500)
 
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
