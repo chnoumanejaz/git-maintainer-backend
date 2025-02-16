@@ -113,16 +113,25 @@ def push_commits(repo_name, num_commits, github_username, github_token, snippets
         shutil.rmtree(local_path, ignore_errors=True)
         return {"status": "error", "message": str(e), "messages": ["An error occurred while pushing the commits.", str(e)]}
 
-@api_view(['POST'])
+@api_view(['POST', 'PATCH'])
 @permission_classes([IsAuthenticated])
 def save_github_credentials(request):
     """Save GitHub username and token"""
     print(request.user)
     request.data["user"] = request.user.id
-    serializer = GitHubCredentialsSerializer(data=request.data)
+    if request.method == "PATCH":
+        try:
+            credentials = GitHubCredentials.objects.get(user=request.user)
+            serializer = GitHubCredentialsSerializer(credentials, data=request.data, partial=True)
+        except GitHubCredentials.DoesNotExist:
+            return Response({"error": ["No credentials found."]}, status=404)
+    else:
+        serializer = GitHubCredentialsSerializer(data=request.data)
+
     if serializer.is_valid(raise_exception=True):
         serializer.save()
-        return Response({"status": "Github credentials saved successfully!"})
+        return Response({"message": "Github credentials saved successfully!"})
+
     return Response(serializer.errors, status=400)
 
 @api_view(['GET'])
@@ -196,5 +205,6 @@ def make_commits(request):
 @permission_classes([IsAuthenticated])
 def get_commits_history(request):
     """Get commit history of the user"""
-    serializer = GitHubCommitsSerializer(request.user.commit_history, many=True)
+    commit_history = request.user.commit_history.order_by('-created_at')
+    serializer = GitHubCommitsSerializer(commit_history, many=True)
     return Response(serializer.data, status=200)
