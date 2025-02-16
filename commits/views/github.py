@@ -112,7 +112,7 @@ def push_commits(repo_name, num_commits, github_username, github_token, snippets
     except Exception as e:
         # Delete the cloned repository to free space
         shutil.rmtree(local_path, ignore_errors=True)
-        return {"status": "error", "message": str(e), "messages": ["An error occurred while pushing the commits.", str(e)]}
+        return {"status": "error", "messages": ["An error occurred while pushing the commits.", str(e)]}
 
 @api_view(['POST', 'PATCH'])
 @permission_classes([IsAuthenticated])
