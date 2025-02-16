@@ -6,6 +6,7 @@ urlpatterns = [
     # Auth endpoints
     path("register/", register_user, name="register"),
     path("login/", login_user, name="login"),
+   #TODO: Add refresh token route
 
     # GitHub API endpoints
     path("save_github/", save_github_credentials, name="save_github"),
