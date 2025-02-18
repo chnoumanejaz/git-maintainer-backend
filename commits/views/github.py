@@ -4,58 +4,10 @@ from rest_framework.permissions import IsAuthenticated
 from commits.models import GitHubCredentials
 from rest_framework.exceptions import ValidationError
 from commits.serializers import GitHubCredentialsSerializer, GitHubCommitsSerializer
-import os, git, time, json, re, shutil
+import os, git, time, shutil
 from github import Github
-from openai import OpenAI
-from commits.openai.openai_models import OpenAIResponse
-
-
-# GitHub Credentials (Replace with your actual token)
-# GITHUB_TOKEN = "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" # testing token
-# GITHUB_USERNAME = "noumanejazz"
-API_KEY_DEEPSEEK = "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" # testing key
-
-
-# Load system context from file
-context_path = "commits/openai/context.txt"
-print("context_path", context_path)
-
-with open(context_path, "r") as file:
-    system_context = file.read()
-
-client = OpenAI(
-  base_url="https://openrouter.ai/api/v1",
-  api_key=API_KEY_DEEPSEEK,
-)
-
-def get_ai_response(user_input: str) -> OpenAIResponse:
-    completion = client.chat.completions.create(
-        extra_body={},
-        model="deepseek/deepseek-r1-distill-llama-70b:free",
-        messages=[
-            {"role": "system", "content": system_context},
-            {"role": "user", "content": user_input}
-        ]
-    )
-
-    response_text = completion.choices[0].message.content.strip()
-
-    print("response_text", response_text , "\n\n\n\n\n\n\n\n\n")
-
-    match = re.search(r'\{(.*)\}', response_text, re.DOTALL)
-    extracted_response = ""
-    if match:
-        extracted_response = match.group(0)
-        print(extracted_response)
-    else:
-        print("No data found inside {}")
-
-    # Convert to a dictionary
-    response_dict = json.loads(extracted_response)
-
-    # Convert to Pydantic model
-    return OpenAIResponse(**response_dict)
-
+from commits.utils import verify_github_credentials
+from commits.openai.helpers import get_ai_response
 
 def push_commits(repo_name, num_commits, github_username, github_token, snippets):
     local_path = f"./{repo_name}"
@@ -180,9 +132,20 @@ def make_commits(request):
         repo_name = request.data["repo_name"]
         num_commits = request.data["num_commits"]
 
-        result = None
+        # Verify GitHub credentials
+        if not verify_github_credentials(credentials.github_username, credentials.github_token):
+            update_serializer = GitHubCommitsSerializer(
+                commit_instance,
+                data={"messages": ["Invalid GitHub credentials. Please update your credentials."]},
+                partial=True
+            )
+            if update_serializer.is_valid(raise_exception=True):
+                update_serializer.save()
+            return Response({"error": "Invalid GitHub credentials. Please update your credentials."}, status=400)
+
+        # Proceed with AI processing
         user_message = user_input + f" and make {num_commits} commits"
-        response = get_ai_response(user_message)
+        response = get_ai_response(user_message, 'make_commits')
         print("response--> ", response)
 
         if response and response.is_pushable:
