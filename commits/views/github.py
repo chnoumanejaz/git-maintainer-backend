@@ -8,8 +8,10 @@ import os, git, time, shutil
 from github import Github
 from commits.utils import verify_github_credentials
 from commits.openai.helpers import get_ai_response
+from commits.logger import Log as log
 
 def push_commits(repo_name, num_commits, github_username, github_token, snippets):
+    log.info(message="Pushing commits to GitHub...")
     local_path = f"./{repo_name}"
     try:
         github = Github(github_token)
@@ -18,9 +20,10 @@ def push_commits(repo_name, num_commits, github_username, github_token, snippets
 
         # Check if repo exists, create if not
         try:
+            log.info(message=f'Fetching github repo {repo_name}')
             repo = user.get_repo(repo_name)
         except Exception:
-            print(f"⚠️ Repository '{repo_name}' not found. Creating a new repo...")
+            log.warning(f"Repository '{repo_name}' not found. Creating a new repo...")
             repo = user.create_repo(repo_name, private=True)
             new_repo = True
 
@@ -31,16 +34,19 @@ def push_commits(repo_name, num_commits, github_username, github_token, snippets
             repo = git.Repo(local_path)
             repo.remote().pull()
         else:
+            log.info(message="Clonning repository...")
             git.Repo.clone_from(repo_url, local_path)
 
         repo = git.Repo(local_path)
 
         # Set Git config
         with repo.config_writer() as config:
+            log.info(message="Setting git config...")
             config.set_value("user", "name", github_username)
             config.set_value("user", "email", f"{github_username}@users.noreply.github.com")
 
         # Create & push commits
+        log.info(message="Pushing commits...")
         commit_messages = []
         for problem in snippets:
             filename = f"{problem.title}.{problem.file_type}"
@@ -52,17 +58,20 @@ def push_commits(repo_name, num_commits, github_username, github_token, snippets
             repo.git.add(A=True)
             repo.index.commit(problem.commit_message)
             repo.remote().push()
-            print(f"✅ Commit pushed: {problem.commit_message}")
+            log.success(f"✅ Commit pushed: {problem.commit_message}")
             commit_messages.append(problem.commit_message)
 
             time.sleep(2)
 
+        log.success(f"{num_commits} commits pushed")
         # Delete the cloned repository to free space
+        log.info("Deleting cloned repository...")
         shutil.rmtree(local_path, ignore_errors=True)
         return {"status": "success", "message": f"{num_commits} commits pushed successfully!", "messages": commit_messages, "new_repo": new_repo}
 
     except Exception as e:
         # Delete the cloned repository to free space
+        log.info("Deleting cloned repository...")
         shutil.rmtree(local_path, ignore_errors=True)
         return {"status": "error", "messages": ["An error occurred while pushing the commits.", str(e)]}
 
@@ -70,7 +79,7 @@ def push_commits(repo_name, num_commits, github_username, github_token, snippets
 @permission_classes([IsAuthenticated])
 def save_github_credentials(request):
     """Save GitHub username and token"""
-    print(request.user)
+    log(message="Request user:", data=request.user)
     request.data["user"] = request.user.id
     if request.method == "PATCH":
         try:
@@ -93,8 +102,8 @@ def get_github_credentials(request):
     """Get saved GitHub credentials"""
     try:
         credentials = GitHubCredentials.objects.get(user=request.user)
-        return Response(GitHubCredentialsSerializer(credentials).data, status=200)
 
+        return Response(GitHubCredentialsSerializer(credentials).data, status=200)
     except GitHubCredentials.DoesNotExist:
         return Response({"error": "No credentials found."}, status=404)
 
@@ -128,6 +137,7 @@ def make_commits(request):
         base_serializer = GitHubCommitsSerializer(data=request.data)
         if base_serializer.is_valid(raise_exception=True):
             commit_instance = base_serializer.save()
+            log.success(message="Initial Commit history saved successfully.")
 
         repo_name = request.data["repo_name"]
         num_commits = request.data["num_commits"]
@@ -146,7 +156,6 @@ def make_commits(request):
         # Proceed with AI processing
         user_message = user_input + f" and make {num_commits} commits"
         response = get_ai_response(user_message, 'make_commits')
-        print("response--> ", response)
 
         if response and response.is_pushable:
             result = push_commits(repo_name, num_commits, credentials.github_username, credentials.github_token, response.snippets)
@@ -161,6 +170,7 @@ def make_commits(request):
         }
         update_serializer = GitHubCommitsSerializer(commit_instance, data=update_data, partial=True)
         if update_serializer.is_valid(raise_exception=True):
+            log.success("Updated the commit history.")
             update_serializer.save()
 
         status_code = 201 if result["status"] == "success" else 400
