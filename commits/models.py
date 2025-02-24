@@ -3,6 +3,7 @@ from django.contrib.auth.models import User
 
 class CommitHistory(models.Model):
     user = models.ForeignKey(User, on_delete=models.CASCADE, related_name="commit_history")
+    #TODO: add the user_input field
     repo_name = models.CharField(max_length=255)
     num_commits = models.IntegerField()
     messages = models.JSONField(blank=True, null=True)
