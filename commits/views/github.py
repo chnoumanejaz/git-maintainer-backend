@@ -79,7 +79,7 @@ def push_commits(repo_name, num_commits, github_username, github_token, snippets
 @permission_classes([IsAuthenticated])
 def save_github_credentials(request):
     """Save GitHub username and token"""
-    log(message="Request user:", data=request.user)
+    log.log(message="Request user:", data=request.user)
     request.data["user"] = request.user.id
     if request.method == "PATCH":
         try:
